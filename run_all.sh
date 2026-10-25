@@ -12,4 +12,6 @@ python scripts/02_build_candidates.py
 python tests/test_no_leakage.py
 python scripts/03_train_baseline.py
 python scripts/04_auto_features.py
-python scripts/05_compare.py
+python scripts/05_family_selection.py
+python scripts/06_information_ablation.py
+python scripts/07_compare.py

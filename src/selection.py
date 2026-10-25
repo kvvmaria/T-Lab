@@ -103,6 +103,63 @@ def choose_top_n(data, targets, ranked_features, cutoffs, metric="valid_ndcg@10"
     return ranked_features[:best_n], curve
 
 
+# ------------------------------------------------------------------ отбор семействами
+
+def group_permutation_importance(model, valid, features, groups, n_users=4_000, seed=config.SEED):
+    """Как permutation importance, но перемешиваем сразу всю группу признаков.
+
+    Зачем: окна 7/14/30 дней одного и того же агрегата сильно коррелируют. Если
+    перемешать только одно окно, модель возьмёт информацию из соседнего, и признак
+    покажется бесполезным. Перемешивание целой группы этой проблемы не имеет.
+    Строки перемешиваются одной перестановкой на группу, чтобы связи внутри группы сохранились.
+    """
+    rng = np.random.default_rng(seed)
+    users = rng.choice(valid["user_id"].unique(), min(n_users, valid["user_id"].nunique()), replace=False)
+    part = valid[valid["user_id"].isin(users)]
+    X = gbdt.to_matrix(part, features)
+    y = part["label"].to_numpy()
+    base = log_loss(y, model.predict_proba(X)[:, 1])
+    position = {f: j for j, f in enumerate(features)}
+
+    rows = []
+    for group, members in groups.items():
+        cols = [position[f] for f in members]
+        shuffled = X.copy()
+        shuffled[:, cols] = shuffled[rng.permutation(len(X))][:, cols]
+        rows.append({"family": group, "n_features": len(members),
+                     "importance": log_loss(y, model.predict_proba(shuffled)[:, 1]) - base})
+    return pd.DataFrame(rows).sort_values("importance", ascending=False).reset_index(drop=True)
+
+
+def run_by_family(data, targets, features, family_of, cutoffs=(3, 5, 8, 12, 16, 20, 30, 40)):
+    """Отбор семействами: семейство = сущность + агрегат + фильтр событий, все окна сразу.
+
+    1. Модель на всех признаках -> групповая permutation importance на валидации.
+    2. Модели на топ-K семействах для разных K -> выбираем K по NDCG@10 на валидации.
+    """
+    groups = {}
+    for feature in features:
+        groups.setdefault(family_of[feature], []).append(feature)
+
+    model = gbdt.train(data["train"], data["valid"], features)
+    importance = group_permutation_importance(model, data["valid"], features, groups)
+    ranked = importance[importance["importance"] > 0]["family"].to_list()
+    print(f"Семейств: {len(groups)}, с положительной важностью: {len(ranked)}")
+
+    rows = []
+    for k in sorted({k for k in cutoffs if k < len(ranked)} | {len(ranked)}):
+        chosen = [f for family in ranked[:k] for f in groups[family]]
+        _, result = fit_and_evaluate(data, targets, chosen, use_test=False)
+        rows.append({"n_families": k, "n_features": len(chosen),
+                     "valid_ndcg@10": result["valid_ndcg@10"], "valid_logloss": result["valid_logloss"]})
+        print(f"  top-{k:2d} семейств ({len(chosen):3d} признаков): valid_ndcg@10={result['valid_ndcg@10']:.4f}")
+    curve = pd.DataFrame(rows)
+    best_k = int(curve.loc[curve["valid_ndcg@10"].idxmax(), "n_families"])
+    selected = [f for family in ranked[:best_k] for f in groups[family]]
+    print(f"Выбрано семейств: {best_k}, признаков: {len(selected)}")
+    return selected, {"family_importance": importance, "family_curve": curve}
+
+
 def run(data, targets, features, cutoffs=(5, 10, 15, 20, 30, 40, 60, 80, 120)):
     """Полный отбор. Возвращает отобранные признаки и все промежуточные таблицы."""
     screening = screen(data["train"], features)
