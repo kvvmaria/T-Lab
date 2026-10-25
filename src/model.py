@@ -28,14 +28,24 @@ PARAMS = dict(
 )
 
 
+def to_matrix(df, features):
+    """float32-матрица без промежуточной копии DataFrame (при 300 признаках это экономит гигабайты)."""
+    matrix = np.empty((len(df), len(features)), dtype=np.float32)
+    for j, feature in enumerate(features):
+        matrix[:, j] = df[feature].to_numpy(np.float32)
+    return matrix
+
+
 def train(train_df, valid_df, features, params=None):
     model = HistGradientBoostingClassifier(**(params or PARAMS))
     started = time.time()
-    model.fit(train_df[features].to_numpy(np.float32), train_df["label"].to_numpy(),
-              X_val=valid_df[features].to_numpy(np.float32), y_val=valid_df["label"].to_numpy())
+    model.fit(to_matrix(train_df, features), train_df["label"].to_numpy(),
+              X_val=to_matrix(valid_df, features), y_val=valid_df["label"].to_numpy())
     model.fit_seconds_ = time.time() - started
     return model
 
 
-def predict(model, df, features):
-    return model.predict_proba(df[features].to_numpy(np.float32))[:, 1]
+def predict(model, df, features, chunk_size=100_000):
+    parts = [model.predict_proba(to_matrix(df.iloc[i:i + chunk_size], features))[:, 1]
+             for i in range(0, len(df), chunk_size)]
+    return np.concatenate(parts)

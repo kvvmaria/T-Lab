@@ -1,5 +1,7 @@
 """Общий каркас эксперимента: одинаковые недели, кандидаты и оценка для всех подходов."""
 
+import ctypes
+import gc
 import time
 
 import numpy as np
@@ -46,7 +48,19 @@ def build_split(events, build_features):
     train = pd.concat([frames[w] for w in config.TRAIN_WEEKS], ignore_index=True)
     data = {"train": train, "valid": frames[config.VALID_WEEK], "test": frames[config.TEST_WEEK]}
     targets = {"valid": weeks[config.VALID_WEEK].target, "test": weeks[config.TEST_WEEK].target}
-    return data, targets, time.time() - started
+    elapsed = time.time() - started
+    del frames, weeks
+    free_memory()
+    return data, targets, elapsed
+
+
+def free_memory():
+    """Возвращаем системе память, оставшуюся от промежуточных таблиц (актуально для Linux)."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except OSError:
+        pass
 
 
 def evaluate(df, scores, target, k=config.K):
