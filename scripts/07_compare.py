@@ -25,10 +25,13 @@ BLUES = LinearSegmentedColormap.from_list("blues", ["#f3f7fd", "#9ec5f4", "#3987
 
 MODELS = [  # имя в results.json, подпись, цвет
     ("popularity_7d", "Популярность за 7 дней", "reference"),
-    ("manual_gbdt", "Бустинг: ручные признаки", "manual"),
-    ("auto_all", "Бустинг: все автопризнаки", "auto"),
-    ("auto_selected", "Бустинг: отобранные автопризнаки", "auto"),
-    ("manual_plus_auto_selected", "Бустинг: ручные + отобранные авто", "combined"),
+    ("manual_gbdt", "Ручные (37)", "manual"),
+    ("manual_without_candidate_features", "Ручные без признаков кандидатов (33)", "manual"),
+    ("auto_all", "Авто: вся сетка (311)", "auto"),
+    ("auto_selected", "Авто: поштучный отбор (55)", "auto"),
+    ("auto_family_ndcg_selected", "Авто: отбор семействами по NDCG (67)", "auto"),
+    ("auto_selected_plus_candidate_features", "Авто (55) + признаки кандидатов (4)", "combined"),
+    ("manual_plus_auto_selected", "Ручные (37) + авто (55)", "combined"),
 ]
 
 plt.rcParams.update({
@@ -76,15 +79,18 @@ def plot_main_comparison(per_user, path):
         highs.append(np.percentile(boots, 97.5) - values.mean())
         colors.append(COLORS[color])
 
-    fig, ax = plt.subplots(figsize=(8, 3.6))
+    # точки с интервалами, а не столбики: разницы маленькие, а у столбика ось обязана начинаться с нуля
+    fig, ax = plt.subplots(figsize=(8.5, 4.6))
     y = np.arange(len(labels))[::-1]
-    ax.barh(y, means, color=colors, height=0.6, xerr=[lows, highs],
-            error_kw={"ecolor": INK_SECONDARY, "elinewidth": 1, "capsize": 3})
-    for yi, m in zip(y, means):
-        ax.text(m + 0.004, yi, f"{m:.4f}", va="center", fontsize=9, color=INK)
+    for yi, m, lo, hi, c in zip(y, means, lows, highs, colors):
+        ax.errorbar(m, yi, xerr=[[lo], [hi]], fmt="o", color=c, markersize=8,
+                    ecolor=c, elinewidth=2, capsize=0)
+        ax.text(m + hi + 0.0008, yi, f"{m:.4f}", va="center", fontsize=9, color=INK)
+    manual_mean = means[[name for name, _, _ in MODELS].index("manual_gbdt")]
+    ax.axvline(manual_mean, color=COLORS["manual"], linewidth=1, linestyle=":")
     ax.set_yticks(y, labels)
-    ax.set_xlim(0.11, max(means) + 0.02)
-    ax.set_xlabel("NDCG@10 на тестовой неделе (усы — 95% бутстрап-интервал)")
+    ax.set_xlim(min(means) - 0.006, max(means) + 0.009)
+    ax.set_xlabel("NDCG@10 на тестовой неделе (линии — 95% бутстрап-интервал по пользователям)")
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     fig.tight_layout()
@@ -94,8 +100,7 @@ def plot_main_comparison(per_user, path):
 
 def plot_window_heatmap(screening, path, top_families=18):
     """Для каждой "семьи" признаков (сущность + агрегат + фильтр) — сила по окнам."""
-    df = screening[screening["window"].notna() | screening["family"].str.contains("days_since")].copy()
-    df = df[~df["family"].str.contains("days_since")]
+    df = screening[~screening["family"].str.contains("days_since")].copy()
     df["window"] = df["window"].fillna(10_000).astype(int)
     best = df.groupby("family")["gauc_strength"].max().sort_values(ascending=False)
     families = best.head(top_families).index
@@ -122,20 +127,24 @@ def plot_window_heatmap(screening, path, top_families=18):
     plt.close(fig)
 
 
-def plot_top_n_curve(curve, manual_valid, path):
-    fig, ax = plt.subplots(figsize=(7, 3.6))
+def plot_top_n_curve(curve, family_curves, manual_valid, auto_all_valid, path):
+    fig, ax = plt.subplots(figsize=(7.5, 4))
     ax.plot(curve["n_features"], curve["valid_ndcg@10"], color=COLORS["auto"], linewidth=2,
-            marker="o", markersize=5, label="отобранные автопризнаки")
+            marker="o", markersize=5, label="поштучная важность (LogLoss)")
+    styles = {"logloss": ("#e87ba4", "семейства, важность по LogLoss"),
+              "ndcg": ("#6250d6", "семейства, важность по NDCG@10")}
+    for metric, fam in family_curves.items():
+        color, label = styles[metric]
+        ax.plot(fam["n_features"], fam["valid_ndcg@10"], color=color, linewidth=2,
+                marker="s", markersize=5, label=label)
+    ax.axhline(auto_all_valid, color=COLORS["reference"], linewidth=1.5, linestyle=":",
+               label="вся сетка (311)")
     ax.axhline(manual_valid, color=COLORS["manual"], linewidth=2, linestyle="--",
                label="ручные признаки (37)")
-    best = curve.loc[curve["valid_ndcg@10"].idxmax()]
-    ax.annotate(f"лучшее: {int(best.n_features)} признаков",
-                (best.n_features, best["valid_ndcg@10"]), xytext=(8, -16),
-                textcoords="offset points", fontsize=9, color=INK)
-    ax.set_xlabel("Сколько топ-признаков по permutation importance оставили")
+    ax.set_xlabel("Сколько признаков оставили")
     ax.set_ylabel("NDCG@10, валидация")
     ax.grid(color=GRID, linewidth=0.8)
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(path, dpi=140)
     plt.close(fig)
@@ -208,7 +217,10 @@ def main():
 
     plot_main_comparison(per_user, config.FIGURES_DIR / "main_comparison.png")
     plot_window_heatmap(screening, config.FIGURES_DIR / "window_heatmap.png")
-    plot_top_n_curve(curve, results["manual_gbdt"]["valid_ndcg@10"], config.FIGURES_DIR / "top_n_curve.png")
+    family_curves = {"logloss": pd.read_csv(selection_dir / "family_curve.csv"),
+                     "ndcg": pd.read_csv(selection_dir / "family_ndcg_curve.csv")}
+    plot_top_n_curve(curve, family_curves, results["manual_gbdt"]["valid_ndcg@10"],
+                     results["auto_all"]["valid_ndcg@10"], config.FIGURES_DIR / "top_n_curve.png")
     plot_importance(importance, selected, config.FIGURES_DIR / "importance_selected.png")
     plot_by_history_length(per_user, test_week.history, config.FIGURES_DIR / "ndcg_by_history_length.png")
     print("\nГрафики сохранены в", config.FIGURES_DIR)
