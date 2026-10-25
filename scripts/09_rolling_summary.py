@@ -23,7 +23,6 @@ MODELS = [  # имя, подпись, цвет
     ("manual_without_candidate_features", "Ручные без признаков кандидатов (33)", "#2a78d6"),
     ("auto_all", "Авто: вся сетка (311)", "#eb6834"),
     ("auto_v4", "Авто: отбор v4", "#eb6834"),
-    ("auto_v3_family_ndcg", "Авто: отбор v3 (семействами)", "#eb6834"),
     ("auto_v4_plus_candidate_features", "Авто v4 + признаки кандидатов", "#1baf7a"),
     ("manual_plus_auto_v4", "Ручные + авто v4", "#1baf7a"),
     ("popularity_3d", "Популярность за 3 дня", "#8a8984"),
@@ -140,8 +139,7 @@ def main():
     print(f"\nЛучшая модель по среднему valid: {best['label']} "
           f"(valid {best['valid_mean']:.4f}, test {best['test_mean']:.4f})")
     for fold_id, payload, _ in folds:
-        print(f"Фолд {fold_id}: v4 выбрал {len(payload['selected']['auto_v4'])} признаков, "
-              f"v3 — {len(payload['selected']['auto_v3_family_ndcg'])}")
+        print(f"Фолд {fold_id}: v4 выбрал {len(payload['selected']['auto_v4'])} признаков")
 
     config.FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plot(summary, folds, config.FIGURES_DIR / "rolling_comparison.png")

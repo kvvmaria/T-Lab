@@ -59,13 +59,15 @@ def run_fold(fold_id):
     print(f"=== Фолд {fold_id}: train {fold['train']}, valid {fold['valid']}, test {fold['test']}")
     events, users, items = load_inputs()
     specs = features_auto.default_specs()
-    spec_by_name = {s.name: s for s in specs}
 
     results, per_user = {}, {}
 
     def record(name, outcome):
         results[name], per_user[name] = outcome
         print_result(name, results[name])
+        # сохраняем после каждой модели, чтобы падение не стирало уже посчитанное
+        PER_USER_DIR.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(per_user).to_pickle(PER_USER_DIR / f"per_user_fold_{fold_id}_partial.pkl")
 
     # --- ручные признаки
     manual, targets, _ = build_split(
@@ -102,11 +104,9 @@ def run_fold(fold_id):
 
     v4, v4_details = selection.run_v4(auto, targets, auto_features)
     record("auto_v4", model_result(auto, targets, v4, load_auto_test))
-
-    family_of = {f: spec_by_name[f].family for f in auto_features}
-    v3, _ = selection.run_by_family(auto, targets, auto_features, family_of, metric="ndcg")
-    record("auto_v3_family_ndcg", model_result(auto, targets, v3, load_auto_test))
     free_memory()
+    # Отбор v3 (семействами) здесь не повторяем: он обучает ещё одну модель на всех
+    # 311 признаках и не помещается в 7 ГБ вместе с остальным. Основной вариант — v4.
 
     # --- объединения: та же информация, что у ручных, и ручные + авто
     combined = {}
@@ -126,13 +126,14 @@ def run_fold(fold_id):
     ROLLING_DIR.mkdir(parents=True, exist_ok=True)
     PER_USER_DIR.mkdir(parents=True, exist_ok=True)
     payload = {"fold": fold, "results": results,
-               "selected": {"auto_v4": v4, "auto_v3_family_ndcg": v3},
+               "selected": {"auto_v4": v4},
                "v4_constant_features": v4_details["constant"]}
     (ROLLING_DIR / f"fold_{fold_id}.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     v4_details["importance"].to_csv(ROLLING_DIR / f"fold_{fold_id}_v4_importance.csv", index=False)
     v4_details["curve"].to_csv(ROLLING_DIR / f"fold_{fold_id}_v4_curve.csv", index=False)
     pd.DataFrame(per_user).to_pickle(PER_USER_DIR / f"per_user_fold_{fold_id}.pkl")
+    (PER_USER_DIR / f"per_user_fold_{fold_id}_partial.pkl").unlink()
 
 
 def main():
