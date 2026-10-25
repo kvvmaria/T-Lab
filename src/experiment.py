@@ -40,8 +40,10 @@ def build_split(events, build_features):
     for week_start in config.TRAIN_WEEKS + [config.VALID_WEEK, config.TEST_WEEK]:
         week, candidates = load_week(events, week_start)
         weeks[week_start] = week
-        frames[week_start] = build_features(week, candidates)
-    train = subsample_train(pd.concat([frames[w] for w in config.TRAIN_WEEKS], ignore_index=True))
+        frame = build_features(week, candidates)
+        # трейн прореживаем сразу, чтобы не держать в памяти полные недели
+        frames[week_start] = subsample_train(frame) if week_start in config.TRAIN_WEEKS else frame
+    train = pd.concat([frames[w] for w in config.TRAIN_WEEKS], ignore_index=True)
     data = {"train": train, "valid": frames[config.VALID_WEEK], "test": frames[config.TEST_WEEK]}
     targets = {"valid": weeks[config.VALID_WEEK].target, "test": weeks[config.TEST_WEEK].target}
     return data, targets, time.time() - started

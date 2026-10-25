@@ -102,7 +102,8 @@ def generate(week, items):
     candidates = candidates.merge(seen, on=["user_id", "item_id"], how="left")
     candidates = candidates[candidates["seen"].isna()].drop(columns="seen")
 
-    positives = week.target[["user_id", "item_id"]].assign(label=1)
+    # drop_duplicates: в KION пары уникальны, но без этого дубли в таргете размножили бы кандидатов
+    positives = week.target[["user_id", "item_id"]].drop_duplicates().assign(label=1)
     candidates = candidates.merge(positives, on=["user_id", "item_id"], how="left")
     candidates["label"] = candidates["label"].fillna(0).astype("int8")
     candidates["week"] = week.name
