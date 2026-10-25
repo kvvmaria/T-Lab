@@ -16,8 +16,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 
-from src import config, features_auto, features_manual, selection
-from src.experiment import build_split, fit_and_evaluate, free_memory, load_inputs
+from src import config, features_auto, features_manual, model as gbdt, selection
+from src.experiment import build_split, evaluate, fit_and_evaluate, free_memory, load_inputs
 from src.metrics import ranking_metrics
 from src.reporting import print_result
 
@@ -39,9 +39,17 @@ def popularity_result(df, column, targets):
     return result, per_user[f"ndcg@{config.K}"]
 
 
-def model_result(data, targets, features):
-    model, result = fit_and_evaluate(data, targets, features)
-    scored = data["test"][["user_id", "item_id"]].assign(score=model.predictions_["test"])
+def model_result(data, targets, features, load_test=None):
+    """Обучение и оценка. Тест подгружается только после обучения (load_test),
+    чтобы во время fit в памяти не было лишних 0.8 ГБ: на 7 ГБ иначе не помещается."""
+    model, result = fit_and_evaluate({"train": data["train"], "valid": data["valid"]},
+                                     targets, features, use_test=False)
+    free_memory()
+    test = load_test() if load_test else data["test"]
+    scores = gbdt.predict(model, test, features)
+    for key, value in evaluate(test, scores, targets["test"]).items():
+        result[f"test_{key}"] = value
+    scored = test[["user_id", "item_id"]].assign(score=scores)
     per_user = ranking_metrics(scored, targets["test"], k=config.K, per_user=True)
     return result, per_user[f"ndcg@{config.K}"]
 
@@ -81,23 +89,35 @@ def run_fold(fold_id):
         events, lambda w, c: features_auto.build(w, c, users, items, specs), fold)
     auto_features = features_auto.feature_columns(auto["test"])
     record("popularity_3d", popularity_result(auto, "a__item__count__3d__all", targets))
-    record("auto_all", model_result(auto, targets, auto_features))
+
+    # тест автопризнаков держим на диске и читаем только для предсказания
+    auto_test_path = PER_USER_DIR / "auto_test_tmp.pkl"
+    auto.pop("test").to_pickle(auto_test_path)
+    free_memory()
+
+    def load_auto_test():
+        return pd.read_pickle(auto_test_path)
+
+    record("auto_all", model_result(auto, targets, auto_features, load_auto_test))
 
     v4, v4_details = selection.run_v4(auto, targets, auto_features)
-    record("auto_v4", model_result(auto, targets, v4))
+    record("auto_v4", model_result(auto, targets, v4, load_auto_test))
 
     family_of = {f: spec_by_name[f].family for f in auto_features}
     v3, _ = selection.run_by_family(auto, targets, auto_features, family_of, metric="ndcg")
-    record("auto_v3_family_ndcg", model_result(auto, targets, v3))
+    record("auto_v3_family_ndcg", model_result(auto, targets, v3, load_auto_test))
+    free_memory()
 
     # --- объединения: та же информация, что у ручных, и ручные + авто
     combined = {}
     manual = pd.read_pickle(manual_path)
+    auto["test"] = load_auto_test()
     for part in ["train", "valid", "test"]:
         combined[part] = auto[part][KEYS + ["label"] + v4].merge(
             manual[part][KEYS + manual_features], on=KEYS, how="inner")
     del auto, manual
     manual_path.unlink()
+    auto_test_path.unlink()
     free_memory()
     record("auto_v4_plus_candidate_features", model_result(combined, targets, v4 + CANDIDATE_FEATURES))
     record("manual_plus_auto_v4", model_result(combined, targets, manual_features + v4))
