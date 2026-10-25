@@ -160,5 +160,21 @@
     "test_map@10": 0.09854864549009172,
     "test_logloss": 0.0984097006617414,
     "test_roc_auc": 0.7696004336126585
+  },
+  "auto_family_ndcg_selected": {
+    "n_features": 67,
+    "fit_seconds": 12.5,
+    "n_iter": 98,
+    "valid_recall@10": 0.21902519655657612,
+    "valid_ndcg@10": 0.14791682483737095,
+    "valid_map@10": 0.10290612519503976,
+    "valid_logloss": 0.093545415637635,
+    "valid_roc_auc": 0.7727367954812521,
+    "test_recall@10": 0.20772036238873343,
+    "test_ndcg@10": 0.137948880637456,
+    "test_map@10": 0.09461514339824346,
+    "test_logloss": 0.0999565609335831,
+    "test_roc_auc": 0.7600936121674995,
+    "selection_seconds": 472.3
   }
 }
