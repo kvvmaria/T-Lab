@@ -98,5 +98,21 @@
     "test_map@10": 0.09385403196369448,
     "test_logloss": 0.09685227372660728,
     "test_roc_auc": 0.7620482770108478
+  },
+  "auto_selected": {
+    "n_features": 55,
+    "fit_seconds": 13.2,
+    "n_iter": 115,
+    "valid_recall@10": 0.21449769012753067,
+    "valid_ndcg@10": 0.1442223263510555,
+    "valid_map@10": 0.09990895846931096,
+    "valid_logloss": 0.0939931483804632,
+    "valid_roc_auc": 0.7659535939796351,
+    "test_recall@10": 0.21286649960219609,
+    "test_ndcg@10": 0.1415776228010584,
+    "test_map@10": 0.09744021988993354,
+    "test_logloss": 0.09854641609010632,
+    "test_roc_auc": 0.7567198278305332,
+    "selection_seconds": 609.4
   }
 }
