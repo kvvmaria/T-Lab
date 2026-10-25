@@ -1,0 +1,10 @@
+# данные не храним в репозитории: их скачивает scripts/00_download_data.sh
+data/
+*.pkl
+*.pickle
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+.DS_Store
