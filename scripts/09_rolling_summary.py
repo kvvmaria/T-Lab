@@ -87,7 +87,10 @@ def plot(summary, folds, path):
     colors = {name: color for name, _, color in MODELS}
     df = summary[summary["model"] != BASE].iloc[::-1].reset_index(drop=True)
 
-    fig, ax = plt.subplots(figsize=(8.5, 4.4))
+    fig, ax = plt.subplots(figsize=(9, 4.6))
+    fold_deltas = [payload["results"][m][f"test_{METRIC}"] - payload["results"][BASE][f"test_{METRIC}"]
+                   for m in df["model"] for _, payload, _ in folds]
+    label_x = max(max(fold_deltas), df["ci_high"].max()) + 0.0012
     ax.axvline(0, color=colors[BASE], linewidth=1.2, linestyle=":")
     for y, row in df.iterrows():
         color = colors[row["model"]]
@@ -98,10 +101,12 @@ def plot(summary, folds, path):
         ax.errorbar(row["delta_test"], y, xerr=[[row["delta_test"] - row["ci_low"]],
                                                  [row["ci_high"] - row["delta_test"]]],
                     fmt="o", color=color, markersize=8, elinewidth=2, capsize=0)
-        ax.text(row["ci_high"] + 0.0006, y, f"{row['delta_test']:+.4f}", va="center", fontsize=9)
+        ax.text(label_x, y, f"{row['delta_test']:+.4f}", va="center", fontsize=9, color=INK)
     ax.set_yticks(range(len(df)), df["label"])
-    ax.set_xlabel("Разница NDCG@10 с ручным бустингом на тесте\n"
-                  "крупная точка — среднее по 3 неделям с 95% бутстрап-интервалом, мелкие — отдельные недели")
+    ax.set_xlim(right=label_x + 0.003)
+    ax.set_xlabel("Разница NDCG@10 с ручным бустингом на тесте (пунктир — ручной бустинг)")
+    ax.set_title("Крупная точка — среднее по 3 тестовым неделям (95% бутстрап-интервал),\n"
+                 "мелкие — отдельные недели", fontsize=9, color=INK_SECONDARY, loc="left")
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     fig.tight_layout()
