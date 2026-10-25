@@ -21,6 +21,7 @@ from sklearn.metrics import log_loss
 
 from src import config, model as gbdt
 from src.experiment import fit_and_evaluate
+from src.metrics import ranking_metrics
 
 
 # ------------------------------------------------------------------ 1. screening
@@ -105,33 +106,46 @@ def choose_top_n(data, targets, ranked_features, cutoffs, metric="valid_ndcg@10"
 
 # ------------------------------------------------------------------ отбор семействами
 
-def group_permutation_importance(model, valid, features, groups, n_users=4_000, seed=config.SEED):
+def group_permutation_importance(model, valid, features, groups, metric="logloss", target=None,
+                                 n_users=4_000, seed=config.SEED):
     """Как permutation importance, но перемешиваем сразу всю группу признаков.
 
     Зачем: окна 7/14/30 дней одного и того же агрегата сильно коррелируют. Если
     перемешать только одно окно, модель возьмёт информацию из соседнего, и признак
     покажется бесполезным. Перемешивание целой группы этой проблемы не имеет.
     Строки перемешиваются одной перестановкой на группу, чтобы связи внутри группы сохранились.
+
+    metric="logloss" — рост LogLoss; metric="ndcg" — падение NDCG@10 (нужен target валидации).
     """
     rng = np.random.default_rng(seed)
     users = rng.choice(valid["user_id"].unique(), min(n_users, valid["user_id"].nunique()), replace=False)
     part = valid[valid["user_id"].isin(users)]
     X = gbdt.to_matrix(part, features)
     y = part["label"].to_numpy()
-    base = log_loss(y, model.predict_proba(X)[:, 1])
-    position = {f: j for j, f in enumerate(features)}
 
+    if metric == "ndcg":
+        part_target = target[target["user_id"].isin(users)]
+
+        def loss(matrix):
+            scored = part[["user_id", "item_id"]].assign(score=model.predict_proba(matrix)[:, 1])
+            return -ranking_metrics(scored, part_target, k=config.K)[f"ndcg@{config.K}"]
+    else:
+        def loss(matrix):
+            return log_loss(y, model.predict_proba(matrix)[:, 1])
+
+    base = loss(X)
+    position = {f: j for j, f in enumerate(features)}
     rows = []
     for group, members in groups.items():
         cols = [position[f] for f in members]
         shuffled = X.copy()
         shuffled[:, cols] = shuffled[rng.permutation(len(X))][:, cols]
-        rows.append({"family": group, "n_features": len(members),
-                     "importance": log_loss(y, model.predict_proba(shuffled)[:, 1]) - base})
+        rows.append({"family": group, "n_features": len(members), "importance": loss(shuffled) - base})
     return pd.DataFrame(rows).sort_values("importance", ascending=False).reset_index(drop=True)
 
 
-def run_by_family(data, targets, features, family_of, cutoffs=(3, 5, 8, 12, 16, 20, 30, 40)):
+def run_by_family(data, targets, features, family_of, metric="logloss",
+                  cutoffs=(3, 5, 8, 12, 16, 20, 30, 40)):
     """Отбор семействами: семейство = сущность + агрегат + фильтр событий, все окна сразу.
 
     1. Модель на всех признаках -> групповая permutation importance на валидации.
@@ -142,7 +156,8 @@ def run_by_family(data, targets, features, family_of, cutoffs=(3, 5, 8, 12, 16, 
         groups.setdefault(family_of[feature], []).append(feature)
 
     model = gbdt.train(data["train"], data["valid"], features)
-    importance = group_permutation_importance(model, data["valid"], features, groups)
+    importance = group_permutation_importance(model, data["valid"], features, groups,
+                                              metric=metric, target=targets["valid"])
     ranked = importance[importance["importance"] > 0]["family"].to_list()
     print(f"Семейств: {len(groups)}, с положительной важностью: {len(ranked)}")
 
