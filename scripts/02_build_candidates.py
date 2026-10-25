@@ -14,9 +14,17 @@ from src.split import make_week
 
 
 def all_weeks():
-    weeks = [(w, "train") for w in config.TRAIN_WEEKS]
-    weeks += [(config.VALID_WEEK, "valid"), (config.TEST_WEEK, "test")]
-    return weeks
+    """Все недели основного разбиения и фолдов rolling evaluation (без повторов)."""
+    roles = {}
+    for fold in config.FOLDS:
+        for w in fold["train"]:
+            roles.setdefault(w, "train")
+        roles.setdefault(fold["valid"], "valid")
+        roles.setdefault(fold["test"], "test")
+    for w in config.TRAIN_WEEKS:
+        roles[w] = "train"
+    roles[config.VALID_WEEK], roles[config.TEST_WEEK] = "valid", "test"
+    return sorted(roles.items())
 
 
 def main():

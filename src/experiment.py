@@ -35,19 +35,24 @@ def subsample_train(df, neg_fraction=config.TRAIN_NEG_FRACTION, seed=config.SEED
     return df[keep].reset_index(drop=True)
 
 
-def build_split(events, build_features):
-    """Строит признаки для всех недель. build_features(week, candidates) -> DataFrame."""
+def default_fold():
+    return {"train": config.TRAIN_WEEKS, "valid": config.VALID_WEEK, "test": config.TEST_WEEK}
+
+
+def build_split(events, build_features, fold=None):
+    """Строит признаки для всех недель фолда. build_features(week, candidates) -> DataFrame."""
+    fold = fold or default_fold()
     started = time.time()
     frames, weeks = {}, {}
-    for week_start in config.TRAIN_WEEKS + [config.VALID_WEEK, config.TEST_WEEK]:
+    for week_start in fold["train"] + [fold["valid"], fold["test"]]:
         week, candidates = load_week(events, week_start)
         weeks[week_start] = week
         frame = build_features(week, candidates)
         # трейн прореживаем сразу, чтобы не держать в памяти полные недели
-        frames[week_start] = subsample_train(frame) if week_start in config.TRAIN_WEEKS else frame
-    train = pd.concat([frames[w] for w in config.TRAIN_WEEKS], ignore_index=True)
-    data = {"train": train, "valid": frames[config.VALID_WEEK], "test": frames[config.TEST_WEEK]}
-    targets = {"valid": weeks[config.VALID_WEEK].target, "test": weeks[config.TEST_WEEK].target}
+        frames[week_start] = subsample_train(frame) if week_start in fold["train"] else frame
+    train = pd.concat([frames[w] for w in fold["train"]], ignore_index=True)
+    data = {"train": train, "valid": frames[fold["valid"]], "test": frames[fold["test"]]}
+    targets = {"valid": weeks[fold["valid"]].target, "test": weeks[fold["test"]].target}
     elapsed = time.time() - started
     del frames, weeks
     free_memory()

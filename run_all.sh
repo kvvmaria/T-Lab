@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Полный прогон эксперимента с нуля. На ноутбуке с 2 ядрами — около часа.
+# Полный прогон эксперимента с нуля. На ноутбуке с 2 ядрами — около 2,5 часов.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -16,3 +16,5 @@ python scripts/05_family_selection.py logloss
 python scripts/05_family_selection.py ndcg
 python scripts/06_information_ablation.py
 python scripts/07_compare.py
+python scripts/08_rolling_evaluation.py
+python scripts/09_rolling_summary.py

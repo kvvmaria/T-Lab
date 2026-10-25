@@ -13,6 +13,12 @@
                    по NDCG@10 на валидации.
 
 Тестовая неделя в отборе не участвует вообще.
+
+История вариантов (подробно — в README, раздел 5.3):
+  v1 — run():           поштучная важность по LogLoss;
+  v2 — run_by_family(): семействами, важность по LogLoss;
+  v3 — run_by_family(metric="ndcg"): семействами, важность по NDCG@10;
+  v4 — run_v4():        поштучно по NDCG@10 + исправленный скрининг. Основной вариант.
 """
 
 import numpy as np
@@ -173,6 +179,53 @@ def run_by_family(data, targets, features, family_of, metric="logloss",
     selected = [f for family in ranked[:best_k] for f in groups[family]]
     print(f"Выбрано семейств: {best_k}, признаков: {len(selected)}")
     return selected, {"family_importance": importance, "family_curve": curve}
+
+
+# ------------------------------------------------------------------ исправленный отбор (v4)
+
+def group_constant_features(df, features, group_cols=("week", "user_id"), max_varying_share=0.01):
+    """Признаки, которые почти не меняются внутри пользователя (например, активность
+    пользователя или его демография). Их одномерный grouped AUC всегда ≈ 0.5,
+    поэтому оценивать их скринингом нельзя — именно эту ошибку допускал отбор v1."""
+    nunique = df.groupby(list(group_cols))[features].nunique(dropna=False)
+    varying_share = (nunique > 1).mean()
+    return varying_share[varying_share <= max_varying_share].index.to_list()
+
+
+def run_v4(data, targets, features, cutoffs=(10, 20, 30, 40, 60, 80, 120), n_users=5_000):
+    """Отбор с исправлениями по итогам v1–v3:
+
+      * признаки, константные внутри пользователя, не проходят скрининг по gAUC,
+        а сразу идут на этап модели (раньше их ошибочно отсекали);
+      * важность — падение NDCG@10 на валидации, а не рост LogLoss
+        (LogLoss обманывается нестационарностью счётчиков, см. v2);
+      * число признаков выбирается по NDCG@10 на валидации, как и раньше.
+    """
+    constant = group_constant_features(data["train"], features)
+    varying = [f for f in features if f not in constant]
+
+    screening = screen(data["train"], varying)
+    kept_varying, dropped_by = drop_redundant(data["train"], screening)
+    # константные внутри пользователя тоже чистим от почти одинаковых, но без порога силы
+    constant_screening = pd.DataFrame({"feature": constant, "gauc_strength": 1.0})
+    kept_constant, dropped_constant = drop_redundant(data["train"], constant_screening)
+    dropped_by.update(dropped_constant)
+    kept = kept_varying + kept_constant
+    print(f"v4: константных внутри пользователя {len(constant)} (оставлено {len(kept_constant)}), "
+          f"остальных после скрининга и дублей {len(kept_varying)}")
+
+    model = gbdt.train(data["train"], data["valid"], kept)
+    importance = group_permutation_importance(model, data["valid"], kept, {f: [f] for f in kept},
+                                              metric="ndcg", target=targets["valid"], n_users=n_users)
+    importance = importance.rename(columns={"family": "feature"}).drop(columns="n_features")
+    useful = importance[importance["importance"] > 0]["feature"].to_list()
+    print(f"v4: положительная важность по NDCG у {len(useful)} признаков")
+
+    cutoffs = sorted({n for n in cutoffs if n < len(useful)} | {len(useful)})
+    selected, curve = choose_top_n(data, targets, useful, cutoffs)
+    print(f"v4: выбрано признаков: {len(selected)}")
+    return selected, {"screening": screening, "constant": constant, "dropped_by": dropped_by,
+                      "importance": importance, "curve": curve}
 
 
 def run(data, targets, features, cutoffs=(5, 10, 15, 20, 30, 40, 60, 80, 120)):
