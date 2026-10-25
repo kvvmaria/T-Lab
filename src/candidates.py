@@ -70,7 +70,7 @@ def _covisit_candidates(history, covisit):
               .rename("score").reset_index()
               .sort_values(["user_id", "score"], ascending=[True, False])
               .groupby("user_id").head(config.N_COVISIT))
-    return scores.rename(columns={"item_id_other": "item_id"})[["user_id", "item_id"]]
+    return scores.rename(columns={"item_id_other": "item_id", "score": "covisit_score"})
 
 
 def generate(week, items):
@@ -88,10 +88,14 @@ def generate(week, items):
 
     frames = []
     for name, frame in sources.items():
-        frame = frame.drop_duplicates().copy()
+        frame = frame.drop_duplicates(["user_id", "item_id"]).copy()
         frame[f"src_{name}"] = 1
         frames.append(frame.set_index(["user_id", "item_id"]))
-    candidates = pd.concat(frames, axis=1).fillna(0).astype("int8").reset_index()
+    # covisit_score остаётся как признак: это "ручная" связь item–item через пользователей
+    candidates = pd.concat(frames, axis=1).fillna(0).reset_index()
+    for name in sources:
+        candidates[f"src_{name}"] = candidates[f"src_{name}"].astype("int8")
+    candidates["covisit_score"] = candidates["covisit_score"].astype("float32")
 
     # убираем уже просмотренное
     seen = user_history[["user_id", "item_id"]].assign(seen=1)
