@@ -56,13 +56,21 @@ def evaluate(df, scores, target, k=config.K):
     return result
 
 
+def save_test_predictions(name, df, scores):
+    """Сохраняем скоры на тесте — по ним 05_compare.py считает бутстрап и графики."""
+    out = df[["user_id", "item_id"]].assign(score=scores.astype(np.float32))
+    out.to_pickle(config.PROCESSED_DIR / f"pred_test_{name}.pkl")
+
+
 def fit_and_evaluate(data, targets, features, params=None, use_test=True):
     """Обучение + оценка. Во время отбора признаков use_test=False: тест не смотрим вообще."""
     model = gbdt.train(data["train"], data["valid"], features, params)
     result = {"n_features": len(features), "fit_seconds": round(model.fit_seconds_, 1),
               "n_iter": int(model.n_iter_)}
+    model.predictions_ = {}
     for part in (["valid", "test"] if use_test else ["valid"]):
         scores = gbdt.predict(model, data[part], features)
+        model.predictions_[part] = scores
         for key, value in evaluate(data[part], scores, targets[part]).items():
             result[f"{part}_{key}"] = value
     return model, result

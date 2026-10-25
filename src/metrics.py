@@ -21,7 +21,8 @@ def top_k(scored, k):
     return ranked
 
 
-def ranking_metrics(scored, target, k=10):
+def ranking_metrics(scored, target, k=10, per_user=False):
+    """per_user=True — вернуть метрики по каждому пользователю (нужно для бутстрапа)."""
     relevant = target.groupby("user_id")["item_id"].apply(set)
     n_relevant = relevant.map(len)
 
@@ -34,21 +35,24 @@ def ranking_metrics(scored, target, k=10):
     recs["cum_hits"] = recs.groupby("user_id")["hit"].cumsum()
     recs["prec_at_hit"] = recs["hit"] * recs["cum_hits"] / recs["rank"]
 
-    per_user = pd.DataFrame(index=relevant.index)
-    per_user["hits"] = recs.groupby("user_id")["hit"].sum()
-    per_user["dcg"] = recs.groupby("user_id")["gain"].sum()
-    per_user["ap_sum"] = recs.groupby("user_id")["prec_at_hit"].sum()
-    per_user = per_user.fillna(0)
+    stats = pd.DataFrame(index=relevant.index)
+    stats["hits"] = recs.groupby("user_id")["hit"].sum()
+    stats["dcg"] = recs.groupby("user_id")["gain"].sum()
+    stats["ap_sum"] = recs.groupby("user_id")["prec_at_hit"].sum()
+    stats = stats.fillna(0)
 
     ideal_hits = np.minimum(n_relevant, k)
     discounts = 1 / np.log2(np.arange(2, k + 2))
     idcg = ideal_hits.map(lambda n: discounts[:n].sum())
 
-    return {
-        f"recall@{k}": float((per_user["hits"] / n_relevant).mean()),
-        f"ndcg@{k}": float((per_user["dcg"] / idcg).mean()),
-        f"map@{k}": float((per_user["ap_sum"] / ideal_hits).mean()),
-    }
+    table = pd.DataFrame({
+        f"recall@{k}": stats["hits"] / n_relevant,
+        f"ndcg@{k}": stats["dcg"] / idcg,
+        f"map@{k}": stats["ap_sum"] / ideal_hits,
+    })
+    if per_user:
+        return table
+    return {name: float(values.mean()) for name, values in table.items()}
 
 
 def classification_metrics(y_true, y_pred):

@@ -5,10 +5,11 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+import numpy as np
 import pandas as pd
 
 from src import config, features_manual
-from src.experiment import build_split, fit_and_evaluate, load_inputs
+from src.experiment import build_split, fit_and_evaluate, load_inputs, save_test_predictions
 from src.metrics import ranking_metrics
 from src.reporting import print_result, save_result
 
@@ -38,6 +39,8 @@ def main():
     result["build_seconds"] = round(build_seconds, 1)
     print_result("manual_gbdt", result)
     save_result("manual_gbdt", result)
+    save_test_predictions("manual_gbdt", data["test"], model.predictions_["test"])
+    save_test_predictions("popularity_7d", data["test"], data["test"]["i_cnt_7d"].to_numpy(np.float32))
 
     # сохраняем данные бейзлайна — пригодятся для объединения с автопризнаками
     for part, df in data.items():

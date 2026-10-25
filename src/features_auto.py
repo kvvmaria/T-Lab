@@ -218,29 +218,31 @@ def build(week, candidates, users, items, specs):
     for spec in specs:
         by_entity.setdefault(spec.entity, []).append(spec)
 
-    df = candidates[["user_id", "item_id", "label", "week"]].copy()
-    fill_zero = []
+    base = candidates[["user_id", "item_id", "label", "week"]].reset_index(drop=True)
+    blocks = [base]
     for entity, entity_specs in by_entity.items():
         if entity == "user":
             table, zeros = _key_stats(user_history, start, "user_id", entity_specs)
-            df = df.merge(table, left_on="user_id", right_index=True, how="left")
+            block = base[["user_id"]].merge(table, left_on="user_id", right_index=True, how="left")
         elif entity == "item":
             table, zeros = _key_stats(history, start, "item_id", entity_specs)
-            df = df.merge(table, left_on="item_id", right_index=True, how="left")
+            block = base[["item_id"]].merge(table, left_on="item_id", right_index=True, how="left")
         elif entity.startswith("user×"):
             attr = entity.split("×")[1]
             table, zeros = _user_attribute_stats(user_history, candidates, items, start, attr, entity_specs)
-            df = df.merge(table, left_on=["user_id", "item_id"], right_index=True, how="left")
+            block = base[["user_id", "item_id"]].merge(table, left_on=["user_id", "item_id"],
+                                                         right_index=True, how="left")
         else:
             segment = entity.split("×")[1]
             table, zeros = _item_segment_stats(history, candidates, users_enc, start, segment, entity_specs)
-            df = df.merge(table, left_on=["user_id", "item_id"], right_index=True, how="left")
-        fill_zero += zeros
-
-    df[fill_zero] = df[fill_zero].fillna(0)
-    names = [s.name for s in specs]
-    df[names] = df[names].astype(np.float32)
-    return df
+            block = base[["user_id", "item_id"]].merge(table, left_on=["user_id", "item_id"],
+                                                         right_index=True, how="left")
+        # каждый блок сразу приводим к float32 и склеиваем в конце одним concat —
+        # так не копируем широкую таблицу на каждом merge (иначе не хватает памяти)
+        block = block[[s.name for s in entity_specs]]
+        block[zeros] = block[zeros].fillna(0)
+        blocks.append(block.astype(np.float32).reset_index(drop=True))
+    return pd.concat(blocks, axis=1)
 
 
 def feature_columns(df):
